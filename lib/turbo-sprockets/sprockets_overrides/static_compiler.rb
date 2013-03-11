@@ -3,6 +3,8 @@ begin
 rescue LoadError
 end
 
+require 'thread'
+
 # Sprockets::StaticCompiler was only introduced in Rails 3.2.x
 if defined?(Sprockets::StaticCompiler)
   module Sprockets
@@ -16,6 +18,8 @@ if defined?(Sprockets::StaticCompiler)
         @manifest_path = options.delete(:manifest_path) || target
         @zip_files = options.delete(:zip_files) || /\.(?:css|html|js|svg|txt|xml)$/
 
+        @num_workers = options.fetch(:num_workers, 12)
+
         @current_source_digests = options.fetch(:source_digests, {})
         @current_digests        = options.fetch(:digests,   {})
 
@@ -25,6 +29,26 @@ if defined?(Sprockets::StaticCompiler)
 
       def compile
         start_time = Time.now.to_f
+
+        jobs = Queue.new
+
+        pool = Array.new(@num_workers) do |i|
+          Thread.new do
+            Thread.current[:id] = i
+            loop do
+              asset = jobs.pop
+              if asset.nil?
+                break
+              else
+                digest_path = write_asset(asset)
+                @digests[asset.logical_path] = digest_path
+                @digests[aliased_path_for(asset.logical_path)] = digest_path
+                # Update current_digests with new hash, for future assets to reference
+                @current_digests[asset.logical_path] = asset.digest_path
+              end
+            end
+          end
+        end
 
         env.each_logical_path(paths) do |logical_path|
           # Fetch asset without any processing or compression,
@@ -39,11 +63,7 @@ if defined?(Sprockets::StaticCompiler)
              !(current_digest_file && File.exists?("#{@target}/#{current_digest_file}"))
 
             if asset = env.find_asset(logical_path)
-              digest_path = write_asset(asset)
-              @digests[asset.logical_path] = digest_path
-              @digests[aliased_path_for(asset.logical_path)] = digest_path
-              # Update current_digests with new hash, for future assets to reference
-              @current_digests[asset.logical_path] = asset.digest_path
+              jobs << asset
             end
           else
             # Set asset file from manifest.yml
@@ -55,6 +75,12 @@ if defined?(Sprockets::StaticCompiler)
                              "(#{@source_digests[logical_path][0...7]})"
           end
         end
+
+        @num_workers.times do
+          jobs << nil
+        end
+
+        pool.map(&:join)
 
         # Encode all filenames & digests as UTF-8 for Ruby 1.9,
         # otherwise YAML dumps other string encodings as !binary
