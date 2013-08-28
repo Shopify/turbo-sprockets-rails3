@@ -18,7 +18,7 @@ if defined?(Sprockets::StaticCompiler)
         @manifest_path = options.delete(:manifest_path) || target
         @zip_files = options.delete(:zip_files) || /\.(?:css|html|js|svg|txt|xml)$/
 
-        @num_workers = options.fetch(:num_workers, 12)
+        @num_workers = (::Rails.application.config.assets.precompile_workers || 12).to_i
 
         @current_source_digests = options.fetch(:source_digests, {})
         @current_digests        = options.fetch(:digests,   {})
