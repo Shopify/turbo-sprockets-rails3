@@ -29,6 +29,7 @@ if defined?(Sprockets::StaticCompiler)
 
       def compile
         start_time = Time.now.to_f
+        env.logger.info "Turbo mode engaged"
 
         jobs = Queue.new
 
